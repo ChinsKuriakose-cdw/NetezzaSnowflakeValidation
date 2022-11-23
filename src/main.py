@@ -106,7 +106,7 @@ def data_validation(netezza, snowflake):
         
 
 if __name__ == '__main__':
-    netezza = Netezza('EDW_SS_PROD', 'ETL_DW_PROD', 'ADD_TYPE_DIM')
-    snowflake = Snowflake('DEV_RAW', 'CDW', 'ADD_TYPE_DIM')
+    netezza = Netezza('DB', 'SCHEMA', 'TABLE')
+    snowflake = Snowflake('DB', 'SCHEMA', 'TABLE')
     assert data_validation(netezza, snowflake)
     print(netezza.column_info_df)
