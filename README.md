@@ -24,7 +24,7 @@ Sample dataframe created by querying the Netezza _v_relation_column view for a p
 7    CHANNEL_GROUP  CHARACTER VARYING(20)
 ```
 
-Sample dataframe created after running validation queries:
+Sample dataframe created after running validation queries in Netezza:
 
 ```
            ATTNAME            FORMAT_TYPE           AVG  MIN        MAX         SUM  NULL_SUM  COUNT
