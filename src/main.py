@@ -1,5 +1,5 @@
 # code to validate data migration from netezza to snowflake using snowflake Stored procedures and Netezza queries
-# uses snowflake connector and netezza connector libraries
+# uses snowflake connector and netezza connector libraries 
 
 import nzpy
 import pandas as pd
