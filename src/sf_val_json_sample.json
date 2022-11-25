@@ -1,74 +1,40 @@
 {
+    "COUNT": 27,
     "ADD_TYPE_SID": {
         "DATATYPE": "NUMBER",
         "AVG": 44527409.481481,
         "MIN": 0,
         "MAX": 300180001,
-        "SUM": 1202240056,
-        "NULL_SUM": 0,
-        "COUNT": 27
+        "SUM": 1202240056
     },
     "ADD_TYPE": {
         "DATATYPE": "VARCHAR",
-        "AVG": 0,
-        "MIN": "APP",
-        "MAX": "XFR",
-        "SUM": 1,
-        "NULL_SUM": 0,
-        "COUNT": 27
+        "MAX_LENGTH": 22
     },
     "ADD_TYPE_DESC": {
         "DATATYPE": "VARCHAR",
-        "AVG": 0,
-        "MIN": "APP",
-        "MAX": "XFR",
-        "SUM": 0,
-        "NULL_SUM": 0,
-        "COUNT": 27
+        "MAX_LENGTH": 20
     },
     "ETL_LOAD_DATE": {
         "DATATYPE": "TIMESTAMP",
-        "AVG": 0,
-        "MIN": 0,
-        "MAX": 0,
-        "SUM": 0,
-        "NULL_SUM": 0,
-        "COUNT": 0
+        "MIN": "2015-05-28 15:53:31",
+        "MAX": "2022-06-07 06:19:30"
     },
     "ETL_UPDATE_DATE": {
         "DATATYPE": "TIMESTAMP",
-        "AVG": 0,
-        "MIN": 0,
-        "MAX": 0,
-        "SUM": 0,
-        "NULL_SUM": 0,
-        "COUNT": 0
+        "MIN": "2015-05-28 15:53:00",
+        "MAX": "2022-06-07 06:19:30"
     },
     "ETL_USER_ID": {
         "DATATYPE": "VARCHAR",
-        "AVG": 0,
-        "MIN": "APP",
-        "MAX": "XFR",
-        "SUM": 0,
-        "NULL_SUM": 0,
-        "COUNT": 27
+        "MAX_LENGTH": 20
     },
     "CHANNEL": {
         "DATATYPE": "VARCHAR",
-        "AVG": 0,
-        "MIN": "APP",
-        "MAX": "XFR",
-        "SUM": 0,
-        "NULL_SUM": 0,
-        "COUNT": 27
+        "MAX_LENGTH": 20
     },
     "CHANNEL_GROUP": {
         "DATATYPE": "VARCHAR",
-        "AVG": 0,
-        "MIN": "APP",
-        "MAX": "XFR",
-        "SUM": 0,
-        "NULL_SUM": 0,
-        "COUNT": 27
+        "MAX_LENGTH": 20
     }
 }
