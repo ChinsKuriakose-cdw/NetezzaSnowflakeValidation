@@ -1,11 +1,12 @@
-################################################ Migration Validation Script ###################################################################
-# code to validate data migration from netezza to snowflake using snowflake Stored procedures and Netezza queries
-# uses snowflake connector and netezza connector libraries
-# author: Chins Kuriakose
+################################## Netezza to Snowflake Migration Validation Script ####################################
+# Description : Code to validate data migration from netezza to snowflake using snowflake Stored procedures and Netezza queries
+#               Uses snowflake connector and netezza connector libraries
+# Author: Chins Kuriakose
 # Created on: 25/11/2022
 # Last updated on: 25/11/2022
 
 import json
+import boto3
 import nzpy
 import pandas as pd
 import numpy as np
@@ -14,8 +15,9 @@ import snowflake.connector as sf
 
 class CountValidationError(Exception):
     """
-        :descrption: Exception raised when the snowflake data count and netezza data count mismatches after the migration task.
+        Exception raised when the snowflake data count and netezza data count mismatches after the migration task.
     """
+
     def __init__(self, sf_count, net_count) -> None:
         """
             :description: constructor function to update the error message in the exception
@@ -26,14 +28,16 @@ class CountValidationError(Exception):
                      Snowflake count : <sf_count>
                      Netezza count : <net_count>
         """
+
         self.message = f"Counts mismatched.\nSnowflake count : {sf_count}\nNetezza count : {net_count}"
         super().__init__(self.message)
 
 
 class DataValidationError(Exception):
     """
-        :descrption: Exception raised when the Data validation between snowflake and netezza databases fail after the migration task.
+        Exception raised when the Data validation between snowflake and netezza databases fail after the migration task.
     """
+
     def __init__(self, report: dict) -> None:
         """
             :description: constructor function to update the error message in the exception
@@ -44,8 +48,8 @@ class DataValidationError(Exception):
                      {
                         "ADD_TYPE": {
                             "MAX_LENGTH": {
-                            "SF": 22,
-                            "Netezza": 20.0
+                                "SF": 22,
+                                "Netezza": 20.0
                             }
                         },
                         "ETL_UPDATE_DATE": {
@@ -56,12 +60,91 @@ class DataValidationError(Exception):
                         }
                      }
         """
+
         self.message = f"Data Validation Failed.\nReport:\n{json.dumps(report, indent=4)}"
         super().__init__(self.message)
 
 
 class Netezza:
+
+    """
+    Class to represent table in Netezza database.
+
+    ...
+
+    Attributes
+    ----------
+    conn: nzpy connection object
+        A connection object to interact with Netezza
+
+    db_name: str
+        Name of the database in Netezza for the table to be validated.
+
+    schema_name: str
+        Name of the schema in Netezza for the table to be validated.
+
+    table_name: str
+        Name of the table for which validation has to be done.
+
+    full_table_name: str
+        Complete name of the table --> DB.SCHEMA.TABLENAME
+
+    date_col: str
+        Name of the column which contains the date for which the validation has to be done.
+
+    start_date: str
+        Start date/timestamp from which the data has to be queried for validation.
+
+    end_date: str
+        End date/timestamp up to which the data has to be queried for validation.
+
+    where_clause: str
+        Based on the date parameter, the query to get data from the netezza table may use this where clause.
+
+    val_df: pandas.Dataframe
+        Dataframe which would contain the column name, data type and other validation parameters from Netezza.
+
+    Methods
+    -------
+    connect_netezza()
+        Creates connection object with credentials from parameter store.
+
+    set_where_clause()
+        Update the where_clause attribute based on the timestamp constraints as per the input.
+
+    get_table_count()
+        Gets count of records from the Netezza table using SQL query.
+
+    get_column_dtype_info()
+        Queries _v_relation_column table to get column details of the table from Netezza.
+
+    int_col_checks(col)
+        Returns average, minimum, maximum, sum for the specified (input) column using SQL query from the Netezza table.
+
+    varchar_col_checks(col)
+        Returns max character length in the specified (input) column from the table in Netezza using SQL query.
+
+    datetime_col_checks(col)
+        Returns minimum and maximum value for the specified (input) column from the table in Netezza using SQL query.
+
+    func_selector(col)
+        Invokes the right validation function based on the column datatype.
+
+    validate_columns()
+        Updates the validation dataframe using pandas apply function with func_selector function.
+
+    """
+
     def __init__(self, db_name, schema_name, table_name, date_col=None, start_date=None, end_date=None):
+        """
+        :description: Constructor to create Netezza object.
+        :param db_name: Name of the database in which the table resides.
+        :param schema_name: Name of the schema in which the table resides.
+        :param table_name: Name of the table.
+        :param date_col: Name of the date column that is used to query the table for data validation.
+        :param start_date: Start date from which the data in the table has to be queried.
+        :param end_date: End date up to which the data in the table has to be queried.
+        """
         self.conn = None
         self.db_name = db_name
         self.schema_name = schema_name
@@ -73,30 +156,38 @@ class Netezza:
         self.where_clause = ''
         self.val_df = None
         # self.connect_netezza()
+        self.set_where_clause()
         self.get_column_dtype_info()
         self.get_table_count()
         self.validate_columns()
 
     def connect_netezza(self):
         """
-            :description: Used to create a connection object to interact with netezza database.
-                          Needs to be updated with parameterized username, password, hostname, port and database
+            :description: Creates connection object with parameterized username, password, hostname, port and database
+                          from parameter store.
         """
+
         self.conn = nzpy.connect(user="admin", password="password", host='localhost',
                                  port=5480, database="db1", securityLevel=1, logLevel=0)
 
-    def get_table_count(self):
-        
-        self.where_clause = ""
+    def set_where_clause(self):
+        """
+        :description: Update the where_clause attribute based on the timestamp constraints as per the input.
+        """
 
         if self.date_col:
             if self.start_date and self.end_date:
                 self.where_clause = f"""\nwhere {self.date_col} > '{self.start_date}'
-                    and {self.date_col} < '{self.end_date}'"""
+                            and {self.date_col} < '{self.end_date}'"""
             elif self.start_date:
                 self.where_clause = f"""\nwhere {self.date_col} > '{self.start_date}'"""
             elif self.end_date:
                 self.where_clause = f"""\nwhere {self.date_col} < '{self.end_date}'"""
+
+    def get_table_count(self):
+        """
+        :description: Gets count of records from the Netezza table using SQL query.
+        """
 
         query = f"""select count(*)
         from {self.full_table_name}{self.where_clause}"""
@@ -106,6 +197,10 @@ class Netezza:
         self.table_count = 27
 
     def get_column_dtype_info(self):
+        """
+        :description: Queries _v_relation_column table to get column details of the table from Netezza.
+        """
+
         query = f"""select 
                 ATTNAME, FORMAT_TYPE 
             from {self.db_name}.{self.schema_name}._v_relation_column 
@@ -119,6 +214,13 @@ class Netezza:
             'src/netezza_col_dtype_sample.csv', sep=',', header='infer')
 
     def int_col_checks(self, col):
+        """
+        :description: Returns average, minimum, maximum, sum for the specified (input) column
+                      using SQL query from the Netezza table
+        :param col: Name of the column from which the validation details have to be queried from.
+        :return: <average:float>, <minimum:float>, <maximum:float>, <sum:float>, np.NaN
+        """
+
         query = f"""select AVG({col}) as AVG, 
             MIN({col}) as MIN, 
             MAX({col}) as MAX, 
@@ -128,12 +230,19 @@ class Netezza:
         # remove this once connection to netezza is established
         df = pd.read_csv('src/int_col_check_sample.csv')
         return df['AVG'][0], \
-            df['MIN'][0], \
-            df['MAX'][0], \
-            df['SUM'][0], \
-            np.NaN
+               df['MIN'][0], \
+               df['MAX'][0], \
+               df['SUM'][0], \
+               np.NaN
 
     def varchar_col_checks(self, col):
+        """
+        :description: Returns max character length in the specified (input) column
+                      from the table in Netezza using SQL query.
+        :param col: Name of the column from which the validation details have to be queried from.
+        :return: np.NaN, np.NaN, np.NaN, np.NaN, <max_length:int>
+        """
+
         query = f"""select 
             max(length({col})) as MAX_LENGTH
         from {self.full_table_name}{self.where_clause}"""
@@ -141,12 +250,19 @@ class Netezza:
         # remove this once connection to netezza is established
         df = pd.read_csv('src/varchar_col_check_sample.csv')
         return np.NaN, \
-            np.NaN, \
-            np.NaN, \
-            np.NaN, \
-            df['MAX_LENGTH'][0]
+               np.NaN, \
+               np.NaN, \
+               np.NaN, \
+               df['MAX_LENGTH'][0]
 
     def datetime_col_checks(self, col):
+        """
+        :description: Returns minimum and maximum value for the specified (input) column
+                      from the table in Netezza using SQL query.
+        :param col: Name of the column from which the validation details have to be queried from.
+        :return: np.NaN, <minimum:float>, <maximum:float>, np.NaN, np.NaN
+        """
+
         query = f"""select 
             min({col}) as MIN,
             max({col}) as MAX
@@ -155,13 +271,19 @@ class Netezza:
         # remove this once connection to netezza is established
         df = pd.read_csv('src/date_col_check_sample.csv')
         return np.NaN, \
-            df['MIN'][0], \
-            df['MAX'][0], \
-            np.NaN, \
-            np.NaN
+               df['MIN'][0], \
+               df['MAX'][0], \
+               np.NaN, \
+               np.NaN
 
     def func_selector(self, col):
-        # for col in self.val_df['ATTNAME'].values:
+        """
+        :description: Invokes the right validation function based on the column datatype.
+        :param col: Name of the column from which the validation details have to be queried from.
+        :return: Output of function called in the if block.
+                 Pattern: <average:float>, <minimum:float>, <maximum:float>, <sum:float>, <max_length:int>
+        """
+
         dtype = self.val_df.loc[self.val_df['ATTNAME'] ==
                                 col, 'FORMAT_TYPE'].iloc[0].split('(')[0].upper()
         if dtype in ('NUMERIC', 'REAL', 'DOUBLE PRECISION', 'INTEGER', 'BYTEINT', 'SMALLINT', 'BIGINT'):
@@ -174,31 +296,82 @@ class Netezza:
             return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
 
     def validate_columns(self):
+        """
+        :description: Updates the validation dataframe using pandas apply function with func_selector function.
+        """
+
         self.val_df['AVG'], \
-            self.val_df['MIN'], \
-            self.val_df['MAX'], \
-            self.val_df['SUM'], \
-            self.val_df['MAX_LENGTH'] = zip(
-                *self.val_df['ATTNAME'].apply(self.func_selector))
-        # print(self.val_df)
+        self.val_df['MIN'], \
+        self.val_df['MAX'], \
+        self.val_df['SUM'], \
+        self.val_df['MAX_LENGTH'] = zip(
+            *self.val_df['ATTNAME'].apply(self.func_selector))
 
 
 class Snowflake:
+    """
+    Class to represent table in Snowflake database
+
+    ...
+    Attributes
+    ----------
+    sf_validation_sp: str
+        Name of the generic validation SP in snowflake which creates a validation json containing the calculated metrics
+        from the Snowflake table
+
+    db_name: str
+        Name of the database in Snowflake for the table to be validated.
+
+    schema_name: str
+        Name of the schema in Snowflake for the table to be validated.
+
+    table_name: str
+        Name of the table for which validation has to be done.
+
+    full_table_name: str
+        Complete name of the table --> DB.SCHEMA.TABLENAME
+
+    val_json: str
+        JSON data returned from the snowflake stored procedure for the particular table.
+
+    table_count: str
+        Count of records in the Snowflake table retrieved from the validation json
+
+    Methods
+    -------
+    connect_snowflake()
+        Creates connection object with credentials from parameter store.
+
+    get_validation_json()
+        Executes the generic snowflake SP and retreives the validation json.
+
+    get_table_count()
+        Retrieves record count from Snowflake validation json.
+    """
 
     sf_validation_sp = 'COMMON.ADMIN.GENERIC_VALIDATION_SP'
 
     def __init__(self, db_name, schema_name, table_name) -> None:
+        """
+        :description: Constructor to create Snowflake class objects.
+        :param db_name: Name of the database in Snowflake for the table to be validated.
+        :param schema_name: Name of the schema in Snowflake for the table to be validated.
+        :param table_name: Name of the table for which validation has to be done.
+        """
         self.db_name = db_name
         self.schema_name = schema_name
         self.table_name = table_name
         self.full_table_name = f"{self.db_name}.{self.schema_name}.{self.table_name}"
-        self.table_count = None
         self.val_json = dict()
+        self.table_count = None
         # self.connect_snowflake()
         self.get_validation_json()
         self.get_table_count()
 
     def connect_snowflake(self):
+        """
+        :description: Creates connection object with credentials from parameter store.
+        """
         self.conn = sf.connect(
             user='suser',
             password='pass@123',
@@ -210,6 +383,9 @@ class Snowflake:
         self.cur = self.conn.cursor()
 
     def get_validation_json(self):
+        """
+        :description: Executes the generic snowflake SP and retreives the validation json.
+        """
         query = f"""call {Snowflake.sf_validation_sp}('{self.db_name}', '{self.schema_name}', '{self.table_name}')"""
         # self.cur.execute(query)
         # self.val_json = json.loads(self.cur.fetchone()[0])
@@ -217,32 +393,47 @@ class Snowflake:
             self.val_json = json.load(f)
 
         # {col1 :{datatype: number, avg: 1, min : 2, max : 3}, clm_nm2 :varchar , lenth : ...}
-    
+
     def get_table_count(self):
+        """
+        :description: Retrieves record count from Snowflake validation json.
+        """
         self.table_count = self.val_json.pop('COUNT')
 
 
+def count_validation(netezza: Netezza, snowflake: Snowflake):
+    """
+    :description: Validates the count of records in netezza and snowflake.
+                  Raises CountValidationError exception if counts mismatched.
+    :param netezza: Object of class Netezza.
+    :param snowflake: Object of class Snowflake.
+    """
 
-def count_validation(netezza: Netezza, snowflake:Snowflake):
     if netezza.table_count != snowflake.table_count:
         raise CountValidationError(snowflake.table_count, netezza.table_count)
 
 
-def data_validation(netezza:Netezza, snowflake:Snowflake):
-
+def data_validation(netezza: Netezza, snowflake: Snowflake):
+    """
+    :description: Validates the data received from snowflake after executing the generic stored procedure with
+                  the data from Netezza which is queried in the functions in Netezza class.
+                  If there are any validation errors, will raise DataValidationError Exception.
+    :param netezza: Object of class Netezza.
+    :param snowflake: Object of class Snowflake.
+    """
     report = dict()
     for col in netezza.val_df['ATTNAME'].values:
         # for key in snowflake.val_json.keys():
-            params = list(snowflake.val_json[col].keys())
-            params.remove('DATATYPE')
-            for param in params:
-                if snowflake.val_json[col][param] != netezza.val_df.loc[netezza.val_df['ATTNAME'] == col, param].iloc[0]:
-                    if col not in report.keys():
-                        report[col] = dict()
-                    if param not in report[col].keys():
-                        report[col][param] = dict()
-                    report[col][param]['SF'] = snowflake.val_json[col][param]
-                    report[col][param]['Netezza'] = netezza.val_df.loc[netezza.val_df['ATTNAME'] == col, param].iloc[0]
+        params = list(snowflake.val_json[col].keys())
+        params.remove('DATATYPE')
+        for param in params:
+            if snowflake.val_json[col][param] != netezza.val_df.loc[netezza.val_df['ATTNAME'] == col, param].iloc[0]:
+                if col not in report.keys():
+                    report[col] = dict()
+                if param not in report[col].keys():
+                    report[col][param] = dict()
+                report[col][param]['SF'] = snowflake.val_json[col][param]
+                report[col][param]['Netezza'] = netezza.val_df.loc[netezza.val_df['ATTNAME'] == col, param].iloc[0]
 
     if report:
         raise DataValidationError(report)
@@ -250,7 +441,6 @@ def data_validation(netezza:Netezza, snowflake:Snowflake):
 
 if __name__ == '__main__':
     netezza = Netezza('DB', 'SCHEMA', 'TABLE')
-
     snowflake = Snowflake('DB', 'SCHEMA', 'TABLE')
     count_validation(netezza, snowflake)
     data_validation(netezza, snowflake)
