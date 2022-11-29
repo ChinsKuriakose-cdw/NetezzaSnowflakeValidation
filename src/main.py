@@ -4,13 +4,19 @@
 # Author: Chins Kuriakose
 # Created on: 25/11/2022
 # Last updated on: 25/11/2022
+# Usage: python main.py [-h] [--date_column DATE_COLUMN] [--start_date START_DATE] [--end_date END_DATE] snowflake_table_name netezza_table_name
 
+import sys
 import json
 import boto3
 import nzpy
+import argparse
 import pandas as pd
 import numpy as np
 import snowflake.connector as sf
+
+
+ssm_client = boto3.client('ssm')
 
 
 class CountValidationError(Exception):
@@ -47,7 +53,7 @@ class DataValidationError(Exception):
                      Report:
                      {
                         "ADD_TYPE": {
-                            "MAX_LENGTH": {
+                            "MAX_STR_LENGTH": {
                                 "SF": 22,
                                 "Netezza": 20.0
                             }
@@ -74,6 +80,9 @@ class Netezza:
 
     Attributes
     ----------
+    netezza_date_col: str
+        Load date column for Netezza tables. Used by default if no particular date column is mentioned in the input.
+
     conn: nzpy connection object
         A connection object to interact with Netezza
 
@@ -103,6 +112,7 @@ class Netezza:
 
     val_df: pandas.Dataframe
         Dataframe which would contain the column name, data type and other validation parameters from Netezza.
+
 
     Methods
     -------
@@ -135,7 +145,9 @@ class Netezza:
 
     """
 
-    def __init__(self, db_name, schema_name, table_name, date_col=None, start_date=None, end_date=None):
+    netezza_date_col = 'ETL_LOAD_DATE'
+
+    def __init__(self, db_name, schema_name, table_name, date_col=netezza_date_col, start_date=None, end_date=None):
         """
         :description: Constructor to create Netezza object.
         :param db_name: Name of the database in which the table resides.
@@ -175,14 +187,13 @@ class Netezza:
         :description: Update the where_clause attribute based on the timestamp constraints as per the input.
         """
 
-        if self.date_col:
-            if self.start_date and self.end_date:
-                self.where_clause = f"""\nwhere {self.date_col} > '{self.start_date}'
-                            and {self.date_col} < '{self.end_date}'"""
-            elif self.start_date:
-                self.where_clause = f"""\nwhere {self.date_col} > '{self.start_date}'"""
-            elif self.end_date:
-                self.where_clause = f"""\nwhere {self.date_col} < '{self.end_date}'"""
+        if self.start_date and self.end_date:
+            self.where_clause = f"""\nwhere {self.date_col} > '{self.start_date}'
+                        and {self.date_col} < '{self.end_date}'"""
+        elif self.start_date:
+            self.where_clause = f"""\nwhere {self.date_col} > '{self.start_date}'"""
+        elif self.end_date:
+            self.where_clause = f"""\nwhere {self.date_col} < '{self.end_date}'"""
 
     def get_table_count(self):
         """
@@ -208,8 +219,10 @@ class Netezza:
                 and DATABASE = '{self.db_name}' 
                 and OWNER = '{self.schema_name}' 
             order by ATTNUM;"""
+
         # self.val_df = pd.read_sql(query, conn) # use this line once the connection to netezza is created.
         # remove this once connection to netezza is established
+
         self.val_df = pd.read_csv(
             'src/netezza_col_dtype_sample.csv', sep=',', header='infer')
 
@@ -226,14 +239,17 @@ class Netezza:
             MAX({col}) as MAX, 
             SUM({col}) as SUM
         from {self.full_table_name}{self.where_clause}"""
+
         # df = pd.read_sql(query, self.conn) # use this line once the connection to netezza is created
         # remove this once connection to netezza is established
         df = pd.read_csv('src/int_col_check_sample.csv')
         return df['AVG'][0], \
-               df['MIN'][0], \
-               df['MAX'][0], \
-               df['SUM'][0], \
-               np.NaN
+            df['MIN'][0], \
+            df['MAX'][0], \
+            df['SUM'][0], \
+            np.NaN, \
+            np.NaN, \
+            np.NaN
 
     def varchar_col_checks(self, col):
         """
@@ -244,16 +260,18 @@ class Netezza:
         """
 
         query = f"""select 
-            max(length({col})) as MAX_LENGTH
+            max(length({col})) as MAX_STR_LENGTH
         from {self.full_table_name}{self.where_clause}"""
         # df = pd.read_sql(query, self.conn) # use this line once the connection to netezza is created
         # remove this once connection to netezza is established
         df = pd.read_csv('src/varchar_col_check_sample.csv')
         return np.NaN, \
-               np.NaN, \
-               np.NaN, \
-               np.NaN, \
-               df['MAX_LENGTH'][0]
+            np.NaN, \
+            np.NaN, \
+            np.NaN, \
+            np.NaN, \
+            np.NaN, \
+            df['MAX_STR_LENGTH'][0]
 
     def datetime_col_checks(self, col):
         """
@@ -264,17 +282,19 @@ class Netezza:
         """
 
         query = f"""select 
-            min({col}) as MIN,
-            max({col}) as MAX
+            min({col}) as MIN_DATE,
+            max({col}) as MAX_DATE
         from {self.full_table_name}{self.where_clause}"""
         # df = pd.read_sql(query, self.conn) # use this line once the connection to netezza is created
         # remove this once connection to netezza is established
         df = pd.read_csv('src/date_col_check_sample.csv')
         return np.NaN, \
-               df['MIN'][0], \
-               df['MAX'][0], \
-               np.NaN, \
-               np.NaN
+            np.NaN, \
+            np.NaN, \
+            np.NaN, \
+            df['MIN_DATE'][0], \
+            df['MAX_DATE'][0], \
+            np.NaN
 
     def func_selector(self, col):
         """
@@ -293,7 +313,7 @@ class Netezza:
         elif dtype in ['DATE', 'INTERVAL'] or 'TIME' in dtype:
             return self.datetime_col_checks(col)
         else:
-            return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
+            return np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN
 
     def validate_columns(self):
         """
@@ -301,10 +321,12 @@ class Netezza:
         """
 
         self.val_df['AVG'], \
-        self.val_df['MIN'], \
-        self.val_df['MAX'], \
-        self.val_df['SUM'], \
-        self.val_df['MAX_LENGTH'] = zip(
+            self.val_df['MIN'], \
+            self.val_df['MAX'], \
+            self.val_df['SUM'], \
+            self.val_df['MIN_DATE'], \
+            self.val_df['MAX_DATE'], \
+            self.val_df['MAX_STR_LENGTH'] = zip(
             *self.val_df['ATTNAME'].apply(self.func_selector))
 
 
@@ -337,6 +359,7 @@ class Snowflake:
     table_count: str
         Count of records in the Snowflake table retrieved from the validation json
 
+
     Methods
     -------
     connect_snowflake()
@@ -350,8 +373,9 @@ class Snowflake:
     """
 
     sf_validation_sp = 'COMMON.ADMIN.GENERIC_VALIDATION_SP'
+    snowflake_date_col = 'ETL_LOAD_TYPE'
 
-    def __init__(self, db_name, schema_name, table_name) -> None:
+    def __init__(self, db_name, schema_name, table_name, date_col=snowflake_date_col, start_date=None, end_date=None) -> None:
         """
         :description: Constructor to create Snowflake class objects.
         :param db_name: Name of the database in Snowflake for the table to be validated.
@@ -363,6 +387,9 @@ class Snowflake:
         self.table_name = table_name
         self.full_table_name = f"{self.db_name}.{self.schema_name}.{self.table_name}"
         self.val_json = dict()
+        self.date_col = date_col
+        self.start_date = start_date
+        self.end_date = end_date
         self.table_count = None
         # self.connect_snowflake()
         self.get_validation_json()
@@ -421,11 +448,18 @@ def data_validation(netezza: Netezza, snowflake: Snowflake):
     :param netezza: Object of class Netezza.
     :param snowflake: Object of class Snowflake.
     """
+
     report = dict()
     for col in netezza.val_df['ATTNAME'].values:
-        # for key in snowflake.val_json.keys():
         params = list(snowflake.val_json[col].keys())
-        params.remove('DATATYPE')
+
+        # remove 'Z' in snowflake timestamps
+        if 'MAX_DATE' in params and snowflake.val_json[col]['MAX_DATE'].endswith('Z'):
+            snowflake.val_json[col]['MAX_DATE'] = snowflake.val_json[col]['MAX_DATE'][:-2]
+        if 'MIN_DATE' in params and snowflake.val_json[col]['MIN_DATE'].endswith('Z'):
+            snowflake.val_json[col]['MIN_DATE'] = snowflake.val_json[col]['MIN_DATE'][:-2]
+
+        params.remove('DATA_TYPE')
         for param in params:
             if snowflake.val_json[col][param] != netezza.val_df.loc[netezza.val_df['ATTNAME'] == col, param].iloc[0]:
                 if col not in report.keys():
@@ -433,14 +467,37 @@ def data_validation(netezza: Netezza, snowflake: Snowflake):
                 if param not in report[col].keys():
                     report[col][param] = dict()
                 report[col][param]['SF'] = snowflake.val_json[col][param]
-                report[col][param]['Netezza'] = netezza.val_df.loc[netezza.val_df['ATTNAME'] == col, param].iloc[0]
+                report[col][param]['Netezza'] = netezza.val_df.loc[netezza.val_df['ATTNAME']
+                                                                   == col, param].iloc[0]
 
     if report:
         raise DataValidationError(report)
 
-
 if __name__ == '__main__':
-    netezza = Netezza('DB', 'SCHEMA', 'TABLE')
-    snowflake = Snowflake('DB', 'SCHEMA', 'TABLE')
+    # reading input arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("snowflake_table_name", help="Full name of the table in Snowflake. Format: DB.SCHEMA.TABLE.")
+    parser.add_argument("netezza_table_name", help="Full name of the table in Netezza. Format: DB.SCHEMA.TABLE.")
+    parser.add_argument("--date_column", help="Column in the table which can be used to query for the required data validation.")
+    parser.add_argument("--start_date", help="Start date from which the data is migrated, hence the date in the table from which the data has to be queried.")
+    parser.add_argument("--end_date", help="End date up to which the data is migrated, hence the date in the table up to which the data has to be queried.")
+    args = parser.parse_args()
+
+    sf_db, sf_schema, sf_table = args.snowflake_table_name.split('.')
+    net_db, net_schema, net_table = args.netezza_table_name.split('.')
+    date_col = None
+    start_date = None
+    end_date = None
+
+    if args.date_column:
+        date_col = args.date_column
+    if args.start_date:
+        start_date = args.start_date
+    if args.end_date:
+        end_date = args.end_date
+
+    netezza = Netezza(sf_db, sf_schema, sf_table, date_col, start_date, end_date)
+    snowflake = Snowflake(net_db, net_schema, net_table, date_col, start_date, end_date)
+
     count_validation(netezza, snowflake)
     data_validation(netezza, snowflake)

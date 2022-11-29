@@ -1,40 +1,40 @@
 {
     "COUNT": 27,
     "ADD_TYPE_SID": {
-        "DATATYPE": "NUMBER",
+        "DATA_TYPE": "NUMBER",
         "AVG": 44527409.481481,
         "MIN": 0,
         "MAX": 300180001,
         "SUM": 1202240056
     },
     "ADD_TYPE": {
-        "DATATYPE": "VARCHAR",
-        "MAX_LENGTH": 22
+        "DATA_TYPE": "VARCHAR",
+        "MAX_STR_LENGTH": 20
     },
     "ADD_TYPE_DESC": {
-        "DATATYPE": "VARCHAR",
-        "MAX_LENGTH": 20
+        "DATA_TYPE": "VARCHAR",
+        "MAX_STR_LENGTH": 20
     },
     "ETL_LOAD_DATE": {
-        "DATATYPE": "TIMESTAMP",
-        "MIN": "2015-05-28 15:53:31",
-        "MAX": "2022-06-07 06:19:30"
+        "DATA_TYPE": "TIMESTAMP",
+        "MIN_DATE": "2015-05-28 15:53:31",
+        "MAX_DATE": "2022-06-07 06:19:30"
     },
     "ETL_UPDATE_DATE": {
-        "DATATYPE": "TIMESTAMP",
-        "MIN": "2015-05-28 15:53:00",
-        "MAX": "2022-06-07 06:19:30"
+        "DATA_TYPE": "TIMESTAMP",
+        "MIN_DATE": "2015-05-28 15:53:31",
+        "MAX_DATE": "2022-06-07 06:19:30"
     },
     "ETL_USER_ID": {
-        "DATATYPE": "VARCHAR",
-        "MAX_LENGTH": 20
+        "DATA_TYPE": "VARCHAR",
+        "MAX_STR_LENGTH": 20
     },
     "CHANNEL": {
-        "DATATYPE": "VARCHAR",
-        "MAX_LENGTH": 20
+        "DATA_TYPE": "VARCHAR",
+        "MAX_STR_LENGTH": 20
     },
     "CHANNEL_GROUP": {
-        "DATATYPE": "VARCHAR",
-        "MAX_LENGTH": 20
+        "DATA_TYPE": "VARCHAR",
+        "MAX_STR_LENGTH": 20
     }
 }
