@@ -9,14 +9,14 @@
 import sys
 import json
 import boto3
-import nzpy
 import argparse
-import pandas as pd
+import jaydebeapi
 import numpy as np
+import pandas as pd
 import snowflake.connector as sf
 
 
-ssm_client = boto3.client('ssm')
+# ssm_client = boto3.client('ssm')
 
 
 class CountValidationError(Exception):
@@ -157,7 +157,7 @@ class Netezza:
         :param start_date: Start date from which the data in the table has to be queried.
         :param end_date: End date up to which the data in the table has to be queried.
         """
-        self.conn = None
+        self.curs = None
         self.db_name = db_name
         self.schema_name = schema_name
         self.table_name = table_name
@@ -173,14 +173,33 @@ class Netezza:
         self.get_table_count()
         self.validate_columns()
 
+    def get_conn_details(self):
+        """
+        :description: Gets connection credentials from from SSM parameter store.
+        :return: user: str --> username to connect with the netezza database
+                 password: str --> password to connect with the netezza database
+                 host: str --> connection url for netezza db
+        """
+        user = ssm_client.get_parameter('pf_qa_nz_username')
+        password = ssm_client.get_parameter('pf_qa_nz_password',
+                                            WithDecryption=True)
+        host = ssm_client.get_parameter('pf_qa_nz_url_with_db')
+        return user, password, host
+
     def connect_netezza(self):
         """
-            :description: Creates connection object with parameterized username, password, hostname, port and database
-                          from parameter store.
+        :description: Creates connection object with parameterized username, password, hostname, port and database
+                      from parameter store.
         """
+        user, password, host = self.get_conn_details()
+        jdbc_driver_name = "org.netezza.Driver"
+        jdbc_driver_loc = "/path/to/nzjdbc3.jar"
+        connection_string = f'jdbc:netezza://{host}'
+        url = f'{connection_string}:user={user};password={password}'
 
-        self.conn = nzpy.connect(user="admin", password="password", host='localhost',
-                                 port=5480, database="db1", securityLevel=1, logLevel=0)
+        conn = jaydebeapi.connect(jdbc_driver_name, connection_string, {'user': user, 'password': password},
+                                  jars=jdbc_driver_loc)
+        self.curs = conn.cursor()
 
     def set_where_clause(self):
         """
@@ -240,7 +259,7 @@ class Netezza:
             SUM({col}) as SUM
         from {self.full_table_name}{self.where_clause}"""
 
-        # df = pd.read_sql(query, self.conn) # use this line once the connection to netezza is created
+        # df = pd.read_sql(query, self.curs) # use this line once the connection to netezza is created
         # remove this once connection to netezza is established
         df = pd.read_csv('src/int_col_check_sample.csv')
         return df['AVG'][0], \
@@ -262,7 +281,7 @@ class Netezza:
         query = f"""select 
             max(length({col})) as MAX_STR_LENGTH
         from {self.full_table_name}{self.where_clause}"""
-        # df = pd.read_sql(query, self.conn) # use this line once the connection to netezza is created
+        # df = pd.read_sql(query, self.curs) # use this line once the connection to netezza is created
         # remove this once connection to netezza is established
         df = pd.read_csv('src/varchar_col_check_sample.csv')
         return np.NaN, \
@@ -285,7 +304,7 @@ class Netezza:
             min({col}) as MIN_DATE,
             max({col}) as MAX_DATE
         from {self.full_table_name}{self.where_clause}"""
-        # df = pd.read_sql(query, self.conn) # use this line once the connection to netezza is created
+        # df = pd.read_sql(query, self.curs) # use this line once the connection to netezza is created
         # remove this once connection to netezza is established
         df = pd.read_csv('src/date_col_check_sample.csv')
         return np.NaN, \
@@ -374,6 +393,8 @@ class Snowflake:
 
     sf_validation_sp = 'COMMON.ADMIN.GENERIC_VALIDATION_SP'
     snowflake_date_col = 'ETL_LOAD_TYPE'
+    snowflake_role = 'SNOWFLAKE_DW_ELT_NONPROD_PII'
+    snowflake_warehouse = 'ELT_WH_NONPROD'
 
     def __init__(self, db_name, schema_name, table_name, date_col=snowflake_date_col, start_date=None, end_date=None) -> None:
         """
@@ -391,23 +412,37 @@ class Snowflake:
         self.start_date = start_date
         self.end_date = end_date
         self.table_count = None
+        self.cur = None
         # self.connect_snowflake()
         self.get_validation_json()
         self.get_table_count()
+
+    def get_conn_details(self):
+        """
+        :description: Gets connection credentials from from SSM parameter store.
+        :return: user: str --> username to connect with the snowflake database
+                 password: str --> password to connect with the snowflake database
+                 host: str --> connection url for snowflake db
+        """
+        user = ssm_client.get_parameter('pf_qa_sf_username')
+        password = ssm_client.get_parameter('pf_qa_sf_password',
+                                            WithDecryption=True)
+        host = ssm_client.get_parameter('pf_qa_sf_url')
+        return user, password, host
 
     def connect_snowflake(self):
         """
         :description: Creates connection object with credentials from parameter store.
         """
-        self.conn = sf.connect(
-            user='suser',
-            password='pass@123',
-            account='abc123.us-east-2',
-            warehouse='demo_wh',
-            database='demo',
-            schema='public'
+        user, password, host = self.get_conn_details()
+        conn = sf.connect(
+            user=user,
+            password=password,
+            account=host
         )
-        self.cur = self.conn.cursor()
+        self.cur = conn.cursor()
+        self.cur.execute(f"USE ROLE {Snowflake.snowflake_role}")
+        self.cur.execute(f"USE WAREHOUSE {Snowflake.snowflake_warehouse}")
 
     def get_validation_json(self):
         """
@@ -425,7 +460,7 @@ class Snowflake:
         """
         :description: Retrieves record count from Snowflake validation json.
         """
-        self.table_count = self.val_json.pop('COUNT')
+        self.table_count = self.val_json.pop('TOTAL_RECORD_COUNT')
 
 
 def count_validation(netezza: Netezza, snowflake: Snowflake):
@@ -473,14 +508,20 @@ def data_validation(netezza: Netezza, snowflake: Snowflake):
     if report:
         raise DataValidationError(report)
 
+
 if __name__ == '__main__':
     # reading input arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("snowflake_table_name", help="Full name of the table in Snowflake. Format: DB.SCHEMA.TABLE.")
-    parser.add_argument("netezza_table_name", help="Full name of the table in Netezza. Format: DB.SCHEMA.TABLE.")
-    parser.add_argument("--date_column", help="Column in the table which can be used to query for the required data validation.")
-    parser.add_argument("--start_date", help="Start date from which the data is migrated, hence the date in the table from which the data has to be queried.")
-    parser.add_argument("--end_date", help="End date up to which the data is migrated, hence the date in the table up to which the data has to be queried.")
+    parser.add_argument("snowflake_table_name",
+                        help="Full name of the table in Snowflake. Format: DB.SCHEMA.TABLE.")
+    parser.add_argument(
+        "netezza_table_name", help="Full name of the table in Netezza. Format: DB.SCHEMA.TABLE.")
+    parser.add_argument(
+        "--date_column", help="Column in the table which can be used to query for the required data validation.")
+    parser.add_argument(
+        "--start_date", help="Start date from which the data is migrated, hence the date in the table from which the data has to be queried.")
+    parser.add_argument(
+        "--end_date", help="End date up to which the data is migrated, hence the date in the table up to which the data has to be queried.")
     args = parser.parse_args()
 
     sf_db, sf_schema, sf_table = args.snowflake_table_name.split('.')
@@ -496,8 +537,10 @@ if __name__ == '__main__':
     if args.end_date:
         end_date = args.end_date
 
-    netezza = Netezza(sf_db, sf_schema, sf_table, date_col, start_date, end_date)
-    snowflake = Snowflake(net_db, net_schema, net_table, date_col, start_date, end_date)
+    netezza = Netezza(sf_db, sf_schema, sf_table,
+                      date_col, start_date, end_date)
+    snowflake = Snowflake(net_db, net_schema, net_table,
+                          date_col, start_date, end_date)
 
     count_validation(netezza, snowflake)
     data_validation(netezza, snowflake)
